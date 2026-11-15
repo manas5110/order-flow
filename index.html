@@ -1,0 +1,1381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b0f14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Order Flow">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<title>One Order, End to End: Animation and Code</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0f14; --panel: #121921; --panel2: #18212b; --line: rgba(255,255,255,.08);
+    --ink: #e8edf2; --mute: #8b97a6;
+    --kafka: #ff7a59; --spark: #f5c542; --delta: #5eead4; --fail: #f43f5e;
+    --sans: 'Space Grotesk', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; color: var(--ink); font-family: var(--sans);
+    background:
+      radial-gradient(ellipse at 15% -10%, rgba(255,122,89,.10), transparent 50%),
+      radial-gradient(ellipse at 90% 110%, rgba(94,234,212,.08), transparent 50%),
+      var(--bg);
+    padding: 22px 16px 60px;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: clamp(26px, 4.6vw, 40px); margin: 6px 0 6px; letter-spacing: -.01em; font-weight: 700; }
+  .sub { color: var(--mute); margin: 0 0 16px; max-width: 800px; font-size: 16px; }
+  .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--mute); }
+  .scenario { font-family: var(--mono); font-size: 13px; color: var(--mute); margin-bottom: 14px; }
+  .scenario b { color: var(--ink); font-weight: 500; }
+
+  /* journey strip */
+  .hops { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 14px; }
+  .hop {
+    font-family: var(--mono); font-size: 13px; padding: 9px 14px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--line); color: var(--mute); cursor: pointer;
+  }
+  .hop.on { color: var(--bg); background: var(--ink); border-color: var(--ink); font-weight: 600; }
+  .hop.k { border-color: rgba(255,122,89,.45); } .hop.s { border-color: rgba(245,197,66,.45); } .hop.d { border-color: rgba(94,234,212,.45); }
+  .arr { color: var(--mute); font-family: var(--mono); }
+
+  /* stats */
+  .stats { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 10px; margin-bottom: 14px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; min-width: 0; }
+  .stat .k { font-family: var(--mono); font-size: 11px; color: var(--mute); text-transform: uppercase; letter-spacing: .08em; }
+  .stat .v { font-family: var(--mono); font-size: 18px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stat.kf .v { color: var(--kafka); } .stat.sp .v { color: var(--spark); } .stat.dl .v { color: var(--delta); }
+
+  /* controls */
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; margin-bottom: 8px;
+  }
+  .grp { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .btn {
+    font-family: var(--mono); font-size: 13px; color: var(--ink); background: var(--panel2);
+    border: 1px solid var(--line); border-radius: 9px; padding: 8px 12px; min-height: 38px; cursor: pointer;
+  }
+  .btn:hover { border-color: rgba(255,255,255,.25); }
+  .btn.primary { background: var(--kafka); color: #1b0f0a; border-color: transparent; font-weight: 600; min-width: 96px; }
+  .btn.on { border-color: var(--spark); color: var(--spark); }
+  .btn.crash.on { border-color: var(--fail); color: var(--fail); }
+  .status { font-family: var(--mono); font-size: 12px; color: var(--mute); margin: 0 2px 10px; }
+
+  .tl { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
+  .tl button {
+    font-family: var(--mono); font-size: 12px; min-width: 34px; height: 34px; border-radius: 999px;
+    background: var(--panel2); color: var(--mute); border: 1px solid var(--line); cursor: pointer; padding: 0 9px;
+  }
+  .tl button.done { color: var(--ink); border-color: rgba(255,255,255,.25); }
+  .tl button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 600; }
+  .bar { height: 3px; background: var(--line); border-radius: 3px; overflow: hidden; margin-bottom: 14px; }
+  .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--kafka), var(--spark), var(--delta)); transition: width .4s ease; }
+
+  /* stage */
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 8px; overflow: hidden; }
+  svg#scene { width: 100%; height: auto; display: block; }
+  svg text { font-family: var(--mono); font-size: 12px; fill: var(--ink); }
+  svg .ztitle { font-family: var(--sans); font-weight: 600; font-size: 13px; letter-spacing: .04em; fill: var(--mute); }
+  svg .sm { font-size: 10.5px; fill: var(--mute); }
+  svg .cl { font-size: 11.5px; fill: var(--ink); }
+  svg .big { font-size: 20px; font-weight: 500; fill: var(--delta); }
+  svg .pl { font-size: 10.5px; fill: var(--ink); }
+  svg .zone { fill: rgba(255,255,255,.012); stroke-width: 1.2; }
+  svg .box { fill: var(--panel2); stroke: #2c3947; stroke-width: 1.2; }
+  svg .webbox { fill: #101820; stroke: #2c3947; }
+  svg .btnrect { fill: rgba(255,122,89,.14); stroke: var(--kafka); stroke-width: 1.2; }
+  svg .broker { fill: #0f161e; stroke: #2c3947; stroke-width: 1.2; transition: stroke .2s; }
+  svg .cell { fill: #131b24; stroke: #2c3947; stroke-width: 1; transition: all .25s; }
+  svg .cell.L { stroke: var(--kafka); fill: rgba(255,122,89,.13); }
+  svg .exec { fill: rgba(245,197,66,.05); stroke: rgba(245,197,66,.45); stroke-width: 1.2; transition: all .25s; }
+  svg .slot { fill: #222d3a; transition: fill .3s; }
+  svg .slot.done { fill: var(--spark); }
+  svg .drv { fill: rgba(245,197,66,.08); stroke: var(--spark); stroke-width: 1.2; transition: all .25s; }
+  svg .lyr { fill: rgba(94,234,212,.05); stroke: rgba(94,234,212,.45); stroke-width: 1.2; transition: all .25s; }
+  svg .hot { stroke: #ffffff !important; stroke-width: 2 !important; }
+  svg .dead { stroke: var(--fail) !important; fill: rgba(244,63,94,.10) !important; }
+  svg .broker.dead { stroke-dasharray: 5 4; }
+  svg .flash { animation: fl .9s ease-out; }
+  @keyframes fl { 0% { filter: brightness(2.4); } 100% { filter: none; } }
+  svg .wire { stroke: rgba(139,151,166,.35); stroke-width: 1.5; fill: none; stroke-dasharray: 3 5; }
+  svg .disk { font-size: 10.5px; fill: var(--spark); }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-family: var(--mono); font-size: 12px; color: var(--mute); margin: 10px 2px 0; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+
+  /* narration + code */
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 14px; margin-top: 16px; align-items: start; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; min-width: 0; }
+  .card .step { font-family: var(--mono); font-size: 12px; color: var(--mute); letter-spacing: .08em; text-transform: uppercase; }
+  .card h2 { font-size: 24px; margin: 6px 0 10px; font-weight: 600; letter-spacing: -.005em; }
+  .card p { margin: 0 0 14px; line-height: 1.65; font-size: 16px; }
+  .card ul { margin: 0; padding-left: 18px; color: var(--mute); font-size: 14.5px; line-height: 1.6; }
+  .card ul li { margin-bottom: 8px; }
+  .lens { border-left: 3px solid var(--kafka); background: rgba(255,122,89,.06); padding: 10px 12px; border-radius: 0 10px 10px 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; }
+  .lensl { font-family: var(--mono); font-size: 11px; color: var(--mute); text-transform: uppercase; letter-spacing: .1em; margin: 14px 0 6px; }
+
+  .codecard { position: sticky; top: 10px; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .tab { font-family: var(--mono); font-size: 12px; padding: 6px 10px; border-radius: 8px; background: var(--panel2); color: var(--mute); border: 1px solid var(--line); cursor: pointer; }
+  .tab.on { color: var(--ink); border-color: var(--ink); }
+  .fhead { display: flex; justify-content: space-between; gap: 8px; font-family: var(--mono); font-size: 12px; color: var(--mute); margin-bottom: 8px; flex-wrap: wrap; }
+  .fhead b { color: var(--ink); font-weight: 500; }
+  .refs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .ref { font-family: var(--sans); font-size: 12.5px; padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,.04); border: 1px dashed rgba(255,255,255,.22); color: var(--ink); cursor: pointer; }
+  .ref.on { background: rgba(255,122,89,.18); border: 1px solid var(--kafka); }
+  .ref.all { border-style: solid; }
+  .code {
+    background: #0a0e13; border: 1px solid var(--line); border-radius: 10px;
+    max-height: 520px; overflow: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+  }
+  .ln { display: grid; grid-template-columns: 44px 1fr; border-left: 3px solid transparent; }
+  .ln .no { color: #3d4856; text-align: right; padding: 0 10px 0 6px; user-select: none; }
+  .ln .tx { white-space: pre; padding-right: 14px; color: #d6dee8; }
+  .ln.on { background: rgba(255,122,89,.14); border-left-color: var(--kafka); }
+  .ln.on .no { color: var(--kafka); }
+  .code .k { color: #ff9d7a; }
+  .code .s { color: #a7f3d0; }
+  .code .c { color: #64748b; font-style: italic; }
+  .code .n { color: #fbbf24; }
+  .code .fl { color: #93c5fd; }
+  .hint { font-family: var(--mono); font-size: 12px; color: var(--mute); margin-top: 10px; line-height: 1.5; }
+  .note { margin-top: 18px; font-size: 14px; color: var(--mute); max-width: 900px; line-height: 1.6; }
+  .note b { color: var(--ink); font-weight: 600; }
+
+  @media (max-width: 900px) {
+    .split { grid-template-columns: 1fr; }
+    .codecard { position: static; }
+  }
+  @media (max-width: 760px) {
+    .stats { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  }
+  @media (prefers-reduced-motion: reduce) { .flash { animation: none; } }
+
+  /* iPad / touch refinements */
+  html, body { -webkit-tap-highlight-color: transparent; }
+  body { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); padding-bottom: max(60px, env(safe-area-inset-bottom)); }
+  .btn, .hop, .tab, .ref, .tl button { min-height: 44px; }
+  .code { -webkit-overflow-scrolling: touch; }
+  @media (min-width: 768px) and (max-width: 1100px) { .stats { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker">Interactive animation with code</div>
+  <h1>One order, end to end</h1>
+  <p class="sub">A shopper clicks Place order. Watch the order travel through a browser, an API, a Kafka topic, a Spark job and a Delta lake. On the right, the exact code that moves it at each step is highlighted.</p>
+  <div class="scenario">Scenario: customer <b>C-102</b> buys order <b>O-5531</b> for <b>$84.50</b>. Kafka topic <b>orders</b>: 3 partitions, 3 copies each.</div>
+
+  <div class="hops" id="hops"></div>
+
+  <div class="stats">
+    <div class="stat kf"><div class="k">Partition 1 latest offset</div><div class="v" id="stHW">4811</div></div>
+    <div class="stat kf"><div class="k">In-sync copies (ISR)</div><div class="v" id="stISR">3 / 3</div></div>
+    <div class="stat sp"><div class="k">Spark checkpoint offset</div><div class="v" id="stCommit">4800</div></div>
+    <div class="stat dl"><div class="k">Delta version</div><div class="v" id="stVer">v741</div></div>
+    <div class="stat dl"><div class="k">EU revenue, this minute</div><div class="v" id="stEU">$1,119.00</div></div>
+  </div>
+
+  <div class="controls">
+    <div class="grp">
+      <button class="btn primary" id="play">Play</button>
+      <button class="btn" id="prev">Prev</button>
+      <button class="btn" id="next">Next</button>
+      <button class="btn" id="restart">Restart</button>
+    </div>
+    <div class="grp">
+      <button class="btn spd" data-s="0.5">0.5×</button>
+      <button class="btn spd on" data-s="1">1×</button>
+      <button class="btn spd" data-s="2">2×</button>
+      <button class="btn spd" data-s="4">4×</button>
+    </div>
+    <div class="grp">
+      <button class="btn crash" id="crash">Simulate broker crash: OFF</button>
+    </div>
+  </div>
+  <div class="status" id="status">ready · press Play</div>
+
+  <div class="tl" id="tl"></div>
+  <div class="bar"><i id="barFill"></i></div>
+
+  <div class="stage">
+    <svg id="scene" viewBox="0 0 1000 540" role="img" aria-label="Animated data flow for one order through the browser, API, Kafka, Spark and Delta Lake"></svg>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--kafka)"></i>Kafka (events, copies)</span>
+    <span><i style="background:var(--spark)"></i>Spark (driver, executors, shuffle)</span>
+    <span><i style="background:var(--delta)"></i>Databricks / Delta Lake</span>
+    <span><i style="background:var(--fail)"></i>Failure</span>
+  </div>
+
+  <div class="split">
+    <div class="card">
+      <div class="step" id="nStep">Step 1 of 14</div>
+      <h2 id="nTitle">Ready</h2>
+      <p id="nBody"></p>
+      <ul id="nUnder"></ul>
+      <div class="lensl">Where the data is right now</div>
+      <div class="lens" id="nLens"></div>
+    </div>
+
+    <div class="card codecard">
+      <div class="tabs" id="tabs"></div>
+      <div class="fhead"><span>File: <b id="fname"></b></span><span id="fdesc"></span></div>
+      <div class="refs" id="refs"></div>
+      <div class="code" id="code"></div>
+      <div class="hint">Highlighted lines are the code that performs the current step. Click a chip to focus one line of code, or "All" to show every one. Click any tab to browse the whole file.</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>How to read the stack:</b> the browser never talks to Kafka directly. It calls the orders API, which is the Kafka producer. Kafka stores the event as a log entry. Spark is a Kafka consumer that tracks its own progress in a checkpoint. Delta Lake stores the results as Parquet files plus a transaction log. A dashboard reads the gold table through another API.
+  </div>
+</div>
+
+<script>
+(function () {
+  /* ================================================================
+     CODE FILES (exactly what the steps reference)
+     ================================================================ */
+  const FILES = {
+    checkout: {
+      name: 'frontend/checkout.js', lang: 'js', tab: 'Checkout (browser)',
+      desc: 'Runs in the shopper\u2019s browser',
+      code: `// checkout.js: runs in the shopper's browser
+async function placeOrder(cart, customer) {
+  // A. Build the order event. The browser never talks to Kafka directly.
+  const order = {
+    order_id: "O-" + Date.now(),
+    customer_id: customer.id,       // "C-102": becomes the Kafka key
+    amount: cart.total,             // 84.50
+    created_at: new Date().toISOString()
+  };
+
+  // B. Send it to our backend API
+  const res = await fetch("/api/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(order)
+  });
+
+  // C. Show success only when the API says Kafka acknowledged it (202)
+  if (res.status === 202) {
+    showConfirmation(order.order_id);
+  } else {
+    showRetry("We could not place your order. Please try again.");
+  }
+}`
+    },
+    orders_api: {
+      name: 'backend/orders_api.py', lang: 'py', tab: 'Orders API (producer)',
+      desc: 'Server-side Kafka producer (FastAPI + confluent-kafka)',
+      code: `# orders_api.py: the Kafka producer, running on our server
+from fastapi import FastAPI, HTTPException
+from confluent_kafka import Producer
+import json
+
+app = FastAPI()
+
+producer = Producer({
+    "bootstrap.servers": "broker1:9092,broker2:9092,broker3:9092",
+    "acks": "all",                  # wait until all in-sync copies have it
+    "enable.idempotence": True,     # retries cannot create duplicates
+    "linger.ms": 5,                 # batch events for 5 ms
+})
+
+@app.post("/api/orders", status_code=202)
+def create_order(order: dict):
+    key = order["customer_id"].encode()     # same customer -> same partition
+    value = json.dumps(order).encode()
+    result = {}
+
+    def on_delivery(err, msg):              # called once Kafka has acknowledged
+        result["err"] = err
+        if msg is not None:
+            result["partition"] = msg.partition()
+            result["offset"] = msg.offset()
+
+    producer.produce("orders", key=key, value=value, on_delivery=on_delivery)
+    producer.flush()                        # block until the ack arrives
+
+    if result.get("err"):
+        raise HTTPException(503, "Kafka did not acknowledge the order")
+    return {"order_id": order["order_id"],
+            "partition": result["partition"],
+            "offset": result["offset"]}`
+    },
+    topic: {
+      name: 'kafka/topic.sh', lang: 'sh', tab: 'Kafka topic setup',
+      desc: 'Run once by the platform team',
+      code: `# topic.sh: run once to create the topic and check its health
+
+# 1. Create the topic: 3 partitions, each stored on 3 brokers
+kafka-topics.sh --bootstrap-server broker1:9092 \\
+  --create --topic orders \\
+  --partitions 3 \\
+  --replication-factor 3 \\
+  --config min.insync.replicas=2 \\
+  --config retention.ms=604800000   # keep 7 days
+
+# 2. Inspect: which broker leads each partition, and which copies are in sync
+kafka-topics.sh --bootstrap-server broker1:9092 --describe --topic orders
+#   Topic: orders  Partition: 1  Leader: 2  Replicas: 2,3,1  Isr: 2,3,1`
+    },
+    spark: {
+      name: 'spark/orders_pipeline.py', lang: 'py', tab: 'Spark pipeline',
+      desc: 'Bronze, silver and gold streams on Databricks',
+      code: `# orders_pipeline.py: runs on a Databricks cluster
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
+
+spark = SparkSession.builder.appName("orders-pipeline").getOrCreate()
+
+ORDER_SCHEMA = StructType([
+    StructField("order_id", StringType()),
+    StructField("customer_id", StringType()),
+    StructField("amount", DoubleType()),
+    StructField("created_at", TimestampType()),
+])
+CHECKPOINT = "/Volumes/main/checkpoints/orders"
+
+# ---------- BRONZE: raw Kafka records, stored exactly as they arrived ----------
+bronze_in = (spark.readStream
+    .format("kafka")
+    .option("kafka.bootstrap.servers", "broker1:9092,broker2:9092,broker3:9092")
+    .option("subscribe", "orders")
+    .option("startingOffsets", "earliest")
+    .option("maxOffsetsPerTrigger", 5000)          # cap the micro-batch size
+    .load())
+
+bronze_q = (bronze_in.writeStream
+    .format("delta")
+    .option("checkpointLocation", CHECKPOINT + "/bronze")
+    .toTable("main.bronze.orders_raw"))
+
+# ---------- SILVER: parse, filter, enrich ----------
+silver_in = spark.readStream.table("main.bronze.orders_raw")
+
+parsed = (silver_in
+    .select(F.from_json(F.col("value").cast("string"), ORDER_SCHEMA).alias("o"))
+    .select("o.*"))
+
+valid = parsed.filter(F.col("amount") > 0)          # narrow: no shuffle
+
+customers = spark.read.table("main.reference.customers")   # small table
+enriched = (valid
+    .join(F.broadcast(customers), "customer_id", "left")  # broadcast join
+    .withColumn("region", F.coalesce("region", F.lit("UNKNOWN"))))
+
+silver_q = (enriched.writeStream
+    .format("delta")
+    .option("checkpointLocation", CHECKPOINT + "/silver")
+    .toTable("main.silver.orders_clean"))
+
+# ---------- GOLD: revenue per region per minute ----------
+gold_in = spark.readStream.table("main.silver.orders_clean")
+
+revenue = (gold_in
+    .withWatermark("created_at", "2 minutes")
+    .groupBy(F.window("created_at", "1 minute"), "region")   # wide: shuffle by region
+    .agg(F.sum("amount").alias("revenue")))                   # sum per window
+
+gold_out = revenue.select(
+    F.col("window.start").alias("window_start"),
+    F.col("window.end").alias("window_end"),
+    "region", "revenue")
+
+gold_q = (gold_out.writeStream
+    .outputMode("append")
+    .format("delta")
+    .option("checkpointLocation", CHECKPOINT + "/gold")       # progress and state
+    .trigger(processingTime="10 seconds")
+    .toTable("main.gold.revenue_by_region"))`
+    },
+    sql: {
+      name: 'sql/gold_queries.sql', lang: 'sql', tab: 'Delta SQL',
+      desc: 'Queries against the Delta gold table',
+      code: `-- Time travel: the EU total as it was before the batch in this story
+SELECT window_start, revenue
+FROM main.gold.revenue_by_region VERSION AS OF 741
+WHERE region = 'EU';
+
+-- Every commit recorded in the _delta_log, as a table
+DESCRIBE HISTORY main.gold.revenue_by_region;
+
+-- Housekeeping: compact small files, then remove old unreferenced files
+OPTIMIZE main.gold.revenue_by_region ZORDER BY (region);
+VACUUM main.gold.revenue_by_region RETAIN 168 HOURS;`
+    },
+    revenue_api: {
+      name: 'backend/revenue_api.py', lang: 'py', tab: 'Revenue API',
+      desc: 'Reads the gold table for the dashboard',
+      code: `# revenue_api.py: answers the dashboard's questions from the gold table
+import os
+from fastapi import FastAPI
+from databricks import sql
+
+app = FastAPI()
+
+@app.get("/api/revenue")
+def revenue(region: str = "EU"):
+    with sql.connect(
+        server_hostname=os.environ["DATABRICKS_HOST"],
+        http_path=os.environ["DATABRICKS_HTTP_PATH"],
+        access_token=os.environ["DATABRICKS_TOKEN"],
+    ) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT window_end, revenue FROM main.gold.revenue_by_region "
+            "WHERE region = :region ORDER BY window_end DESC LIMIT 1",
+            {"region": region},
+        )
+        row = cur.fetchone()
+    return {"region": region, "window_end": str(row[0]), "revenue": row[1]}`
+    },
+    dashboard: {
+      name: 'frontend/dashboard.js', lang: 'js', tab: 'Dashboard (browser)',
+      desc: 'Refreshes the number every 10 seconds',
+      code: `// dashboard.js: runs in the browser
+async function refreshRevenue() {
+  const res = await fetch("/api/revenue?region=EU");
+  const data = await res.json();
+  document.querySelector("#eu-revenue").textContent =
+    data.revenue.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  document.querySelector("#eu-window").textContent = "as of " + data.window_end;
+}
+
+refreshRevenue();
+setInterval(refreshRevenue, 10000);`
+    }
+  };
+
+  /* Each step: which code to highlight. from/to are substrings of lines in that file. */
+  const R = (f, from, to, label) => ({ f, from, to, label });
+
+  /* ================================================================
+     SYNTAX HIGHLIGHTING (small, dependency-free)
+     ================================================================ */
+  const KW = {
+    py: new Set('def return import from as with for in if else elif class lambda None True False await async try except raise and or not is while pass yield'.split(' ')),
+    js: new Set('const let var function async await return if else new import export from try catch throw true false null of'.split(' ')),
+    sql: new Set('SELECT FROM WHERE ORDER BY LIMIT DESC ASC CREATE TABLE IF NOT EXISTS USING AS VERSION OF GROUP AND OR DESCRIBE HISTORY OPTIMIZE ZORDER VACUUM RETAIN HOURS INSERT INTO'.split(' ')),
+    sh: new Set([])
+  };
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  function splitComment(line, lang) {
+    const m = lang === 'js' ? '//' : (lang === 'sql' ? '--' : '#');
+    let q = null;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (q) { if (c === q && line[i - 1] !== '\\') q = null; continue; }
+      if (c === '"' || c === "'") { q = c; continue; }
+      if (line.substr(i, m.length) === m) return [line.slice(0, i), line.slice(i)];
+    }
+    return [line, ''];
+  }
+  const TOK = /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(--?[A-Za-z][\w-]*)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_]\w*)/g;
+  function highlightLine(line, lang) {
+    const [code, comment] = splitComment(line, lang);
+    const html = esc(code).replace(TOK, (m, s, fl, n, w) => {
+      if (s) return '<span class="s">' + m + '</span>';
+      if (fl) return lang === 'sh' ? '<span class="fl">' + m + '</span>' : m;
+      if (n) return '<span class="n">' + m + '</span>';
+      if (w && KW[lang] && KW[lang].has(w)) return '<span class="k">' + m + '</span>';
+      return m;
+    });
+    return html + (comment ? '<span class="c">' + esc(comment) + '</span>' : '');
+  }
+
+  /* ================================================================
+     CODE PANEL
+     ================================================================ */
+  let curFile = 'orders_api';
+  let stepRefs = [];        // refs for the current step
+  let focusIdx = -1;        // -1 = all refs of this step highlighted
+
+  function findLine(lines, text, from) {
+    for (let i = from || 0; i < lines.length; i++) if (lines[i].indexOf(text) !== -1) return i;
+    return -1;
+  }
+  function rangesFor(file) {
+    const lines = FILES[file].code.split('\n');
+    const out = [];
+    stepRefs.forEach((r, idx) => {
+      if (r.f !== file) return;
+      if (focusIdx !== -1 && focusIdx !== idx) return;
+      const a = findLine(lines, r.from, 0);
+      if (a < 0) return;
+      let b = a;
+      if (r.to) { const t = findLine(lines, r.to, a); if (t >= 0) b = t; }
+      out.push([a, b]);
+    });
+    return out;
+  }
+  function renderCode(scrollToFirst) {
+    const f = FILES[curFile];
+    document.getElementById('fname').textContent = f.name;
+    document.getElementById('fdesc').textContent = f.desc;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.f === curFile));
+
+    const lines = f.code.split('\n');
+    const ranges = rangesFor(curFile);
+    const hot = new Set();
+    ranges.forEach(([a, b]) => { for (let i = a; i <= b; i++) hot.add(i); });
+
+    const box = document.getElementById('code');
+    box.innerHTML = '';
+    let firstHot = -1;
+    lines.forEach((ln, i) => {
+      const row = document.createElement('div');
+      row.className = 'ln' + (hot.has(i) ? ' on' : '');
+      row.dataset.i = i;
+      const no = document.createElement('span'); no.className = 'no'; no.textContent = i + 1;
+      const tx = document.createElement('span'); tx.className = 'tx';
+      tx.innerHTML = highlightLine(ln, f.lang) || ' ';
+      row.appendChild(no); row.appendChild(tx);
+      box.appendChild(row);
+      if (hot.has(i) && firstHot === -1) firstHot = i;
+    });
+    if (scrollToFirst && firstHot >= 0) {
+      const el = box.querySelector('.ln[data-i="' + firstHot + '"]');
+      if (el) box.scrollTop = Math.max(0, el.offsetTop - 80);
+    }
+  }
+  function renderTabs() {
+    const tabs = document.getElementById('tabs');
+    tabs.innerHTML = '';
+    Object.keys(FILES).forEach(k => {
+      const b = document.createElement('button');
+      b.className = 'tab'; b.dataset.f = k; b.textContent = FILES[k].tab;
+      b.addEventListener('click', () => { curFile = k; renderCode(false); renderRefs(); });
+      tabs.appendChild(b);
+    });
+  }
+  function renderRefs() {
+    const box = document.getElementById('refs');
+    box.innerHTML = '';
+    if (!stepRefs.length) { box.innerHTML = '<span class="hint" style="margin:0">No code runs in this step. It is the network or the broker doing its job.</span>'; return; }
+    const all = document.createElement('button');
+    all.className = 'ref all' + (focusIdx === -1 ? ' on' : '');
+    all.textContent = 'All (' + stepRefs.length + ')';
+    all.addEventListener('click', () => { focusIdx = -1; renderCode(true); renderRefs(); });
+    box.appendChild(all);
+    stepRefs.forEach((r, idx) => {
+      const b = document.createElement('button');
+      b.className = 'ref' + (focusIdx === idx ? ' on' : '');
+      b.textContent = r.label + '  ·  ' + FILES[r.f].name.split('/').pop();
+      b.addEventListener('click', () => {
+        focusIdx = idx; curFile = r.f; renderCode(true); renderRefs();
+      });
+      box.appendChild(b);
+    });
+  }
+  function setStepCode(refs) {
+    stepRefs = refs || [];
+    focusIdx = -1;
+    if (stepRefs.length) curFile = stepRefs[0].f;
+    renderTabs();
+    renderCode(true);
+    renderRefs();
+  }
+
+  /* ================================================================
+     ANIMATION ENGINE
+     ================================================================ */
+  const NS = 'http://www.w3.org/2000/svg';
+  const C = { kafka: '#ff7a59', spark: '#f5c542', delta: '#5eead4', fail: '#f43f5e', chip: '#e2e8f0' };
+  const svg = document.getElementById('scene');
+  const REG = {};
+
+  let gen = 0, playing = false, speed = 1, loopActive = false, finished = false, cur = 0;
+  const ease = t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  function tween(ms, fn) {
+    const my = gen;
+    return new Promise(res => {
+      let el = 0, last = null;
+      const frame = now => {
+        if (my !== gen) return res();
+        if (last === null) last = now;
+        const dt = now - last; last = now;
+        if (playing) el += dt * speed;
+        const t = ms <= 0 ? 1 : Math.min(1, el / ms);
+        fn(ease(t));
+        if (t >= 1) res(); else requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    });
+  }
+  const wait = ms => tween(ms, () => {});
+
+  function E(tag, a, p) {
+    const e = document.createElementNS(NS, tag);
+    if (a) for (const k in a) e.setAttribute(k, a[k]);
+    (p || svg).appendChild(e);
+    return e;
+  }
+  function T(x, y, s, cls, anchor) {
+    const t = E('text', { x, y, class: cls || '', 'text-anchor': anchor || 'start' });
+    t.textContent = s || '';
+    return t;
+  }
+  function zone(x, y, w, h, title, col, key) {
+    const r = E('rect', { x, y, width: w, height: h, rx: 14, class: 'zone', stroke: col + '55' });
+    T(x + 14, y + 22, title, 'ztitle');
+    if (key) REG[key] = r;
+    return r;
+  }
+
+  const defs = E('defs', {});
+  const mk = E('marker', { id: 'arr', viewBox: '0 0 10 10', refX: '8', refY: '5', markerWidth: '6', markerHeight: '6', orient: 'auto' }, defs);
+  E('path', { d: 'M0,0 L10,5 L0,10 z', fill: '#8b97a6' }, mk);
+  const gf = E('filter', { id: 'glow', x: '-60%', y: '-60%', width: '220%', height: '220%' }, defs);
+  E('feGaussianBlur', { stdDeviation: '2.5', result: 'b' }, gf);
+  const gm = E('feMerge', {}, gf);
+  E('feMergeNode', { in: 'b' }, gm);
+  E('feMergeNode', { in: 'SourceGraphic' }, gm);
+
+  const BX = [250, 350, 450];
+  const CELLY = [130, 186, 242];
+  const EX = [680, 790, 900];
+  const EXX = [630, 740, 850];
+
+  zone(24, 40, 170, 300, 'CHECKOUT APP', '#94a3b8', 'web');
+  E('rect', { x: 40, y: 76, width: 138, height: 124, rx: 10, class: 'webbox' });
+  T(48, 96, '{', 'sm');
+  T(50, 112, '"order": "O-5531",', 'sm');
+  T(50, 128, '"cust": "C-102",', 'sm');
+  T(50, 144, '"amount": 84.50', 'sm');
+  T(48, 160, '}', 'sm');
+  REG.status = T(48, 186, 'pending', 'sm');
+  E('rect', { x: 40, y: 214, width: 138, height: 34, rx: 8, class: 'btnrect' });
+  T(109, 236, 'Place order', 'cl', 'middle');
+
+  zone(230, 40, 350, 300, 'KAFKA · orders topic · 3 partitions · 3 copies', C.kafka, 'kz');
+  REG.kSub = T(568, 62, '', 'sm', 'end');
+  for (let b = 0; b < 3; b++) {
+    REG['broker' + b] = E('rect', { x: BX[b], y: 90, width: 80, height: 230, rx: 10, class: 'broker' });
+    T(BX[b] + 40, 110, 'Broker ' + (b + 1), 'sm', 'middle');
+    for (let p = 0; p < 3; p++) {
+      REG['c' + b + p] = E('rect', { x: BX[b] + 8, y: CELLY[p], width: 64, height: 46, rx: 6, class: 'cell' });
+      REG['t' + b + p] = T(BX[b] + 40, CELLY[p] + 18, '', 'sm', 'middle');
+      REG['o' + b + p] = T(BX[b] + 40, CELLY[p] + 34, '', 'cl', 'middle');
+    }
+    REG['st' + b] = T(BX[b] + 40, 306, 'alive', 'sm', 'middle');
+  }
+  REG.hash = T(246, 334, '', 'sm');
+
+  zone(610, 40, 360, 300, 'SPARK · Structured Streaming', C.spark, 'sz');
+  REG.driver = E('rect', { x: 660, y: 74, width: 260, height: 52, rx: 10, class: 'drv' });
+  REG.dA = T(790, 96, '', 'cl', 'middle');
+  REG.dB = T(790, 114, '', 'sm', 'middle');
+  for (let i = 0; i < 3; i++) {
+    REG['ex' + i] = E('rect', { x: EXX[i], y: 170, width: 100, height: 150, rx: 10, class: 'exec' });
+    T(EXX[i] + 50, 192, 'Executor ' + (i + 1), 'cl', 'middle');
+    for (let k = 0; k < 4; k++) {
+      REG['slot' + i + k] = E('rect', { x: EXX[i] + 14 + (k % 2) * 38, y: 204 + Math.floor(k / 2) * 24, width: 30, height: 16, rx: 4, class: 'slot' });
+    }
+    T(EXX[i] + 50, 268, '4 task slots', 'sm', 'middle');
+    if (i !== 1) REG['disk' + i] = T(EXX[i] + 50, 306, '', 'disk', 'middle');
+  }
+  REG.batch = T(790, 306, '', 'disk', 'middle');
+
+  zone(24, 370, 952, 150, 'DATABRICKS · Delta Lake on cloud storage', C.delta, 'dz');
+  REG.verTxt = T(956, 392, 'v741', 'big', 'end');
+  REG.verTxt.style.fill = C.delta;
+  function layer(key, x, title, name) {
+    REG[key] = E('rect', { x, y: 410, width: 220, height: 84, rx: 10, class: 'lyr' });
+    T(x + 12, 430, title, 'cl');
+    T(x + 12, 446, name, 'sm');
+    REG['fc' + key] = T(x + 12, 464, '', 'sm');
+    REG['fl' + key] = T(x + 12, 480, '', 'sm');
+  }
+  layer('bronze', 60, 'bronze · raw', 'orders_raw');
+  layer('silver', 330, 'silver · clean', 'orders_clean');
+  REG.gold = E('rect', { x: 600, y: 410, width: 220, height: 84, rx: 10, class: 'lyr' });
+  T(612, 430, 'gold · business', 'cl');
+  T(612, 446, 'EU revenue / minute', 'sm');
+  REG.goldVal = T(612, 466, '', 'big');
+  REG.goldVal.style.fill = C.delta;
+  REG.fcgold = T(612, 482, '', 'sm');
+  REG.log = E('rect', { x: 840, y: 410, width: 120, height: 84, rx: 10, class: 'lyr' });
+  T(852, 430, '_delta_log', 'cl');
+  REG.lg0 = T(852, 448, '', 'sm');
+  REG.lg1 = T(852, 464, '', 'sm');
+  [[280, 330], [550, 600], [820, 840]].forEach(([a, b]) => {
+    E('line', { x1: a, y1: 452, x2: b, y2: 452, class: 'wire', 'marker-end': 'url(#arr)' });
+  });
+
+  function pkt(label, color, r) {
+    r = r || 11;
+    const g = E('g', { class: 'pkt tr', transform: 'translate(-100,-100)' });
+    E('circle', { r, fill: color, filter: 'url(#glow)' }, g);
+    const t = E('text', { x: 0, y: -r - 6, 'text-anchor': 'middle', class: 'pl' }, g);
+    t.textContent = label;
+    return g;
+  }
+  function placeAt(g, x, y) { g.setAttribute('transform', 'translate(' + x + ',' + y + ')'); }
+  function setLabel(g, s) { const t = g.querySelector('text'); if (t) t.textContent = s; }
+  function setColor(g, c) { const ci = g.querySelector('circle'); if (ci) ci.setAttribute('fill', c); }
+  function move(g, pts, ms) {
+    const segs = []; let total = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      segs.push(d); total += d;
+    }
+    placeAt(g, pts[0][0], pts[0][1]);
+    return tween(ms, t => {
+      let dist = t * total, i = 0;
+      while (i < segs.length - 1 && dist > segs[i]) { dist -= segs[i]; i++; }
+      const f = segs[i] ? dist / segs[i] : 0;
+      placeAt(g,
+        pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f,
+        pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f);
+    });
+  }
+  function setHL(key, on) { const e = REG[key]; if (e) e.classList.toggle('hot', !!on); }
+  function flash(key) {
+    const e = REG[key]; if (!e) return;
+    e.classList.remove('flash'); void e.getBoundingClientRect(); e.classList.add('flash');
+    setTimeout(() => e.classList.remove('flash'), 950);
+  }
+  function showTxt(key, s) { if (REG[key]) REG[key].textContent = s; }
+  const fmt = n => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const logName = v => '…' + String(v).padStart(6, '0') + '.json';
+
+  const INIT = {
+    hw: [5120, 4811, 3307],
+    leaders: [0, 1, 2],
+    crashed: null,
+    isr: 3,
+    committed: 4800,
+    drv: ['Driver · idle', 'waiting for micro-batches'],
+    eu: 1119,
+    version: 741,
+    logs: [740, 741],
+    files: {
+      bronze: ['part-00411.parquet', 'part-00412.parquet'],
+      silver: ['part-00204.parquet', 'part-00205.parquet'],
+      gold: ['part-00017.parquet', 'part-00018.parquet']
+    },
+    acked: false,
+    slotsDone: false
+  };
+  const clone = o => JSON.parse(JSON.stringify(o));
+  let state = clone(INIT);
+  let activePkt = null;
+  let crashOn = false;
+  let steps = [];
+
+  function render() {
+    const s = state;
+    for (let b = 0; b < 3; b++) {
+      const dead = s.crashed === b;
+      REG['broker' + b].classList.toggle('dead', dead);
+      REG['st' + b].textContent = dead ? 'DOWN' : 'alive';
+      for (let p = 0; p < 3; p++) {
+        const cell = REG['c' + b + p];
+        const isLeader = s.leaders[p] === b;
+        cell.classList.toggle('L', isLeader && !dead);
+        cell.classList.toggle('dead', dead);
+        REG['t' + b + p].textContent = 'p' + p + ' ' + (dead ? '×' : (isLeader ? 'LEADER' : 'copy'));
+        REG['o' + b + p].textContent = dead ? '—' : 'off ' + s.hw[p];
+      }
+    }
+    REG.kSub.textContent = 'ISR ' + s.isr + '/3 · Spark checkpoint ' + s.committed;
+    REG.dA.textContent = s.drv[0];
+    REG.dB.textContent = s.drv[1];
+    REG.goldVal.textContent = fmt(s.eu);
+    REG.verTxt.textContent = 'v' + s.version;
+    [['bronze', s.files.bronze], ['silver', s.files.silver], ['gold', s.files.gold]].forEach(([k, arr]) => {
+      if (REG['fc' + k]) REG['fc' + k].textContent = arr.length + ' files';
+      if (REG['fl' + k]) REG['fl' + k].textContent = arr[arr.length - 1];
+    });
+    REG.lg0.textContent = logName(s.logs[0]);
+    REG.lg1.textContent = logName(s.logs[1]);
+    for (let i = 0; i < 3; i++) for (let k = 0; k < 4; k++) REG['slot' + i + k].classList.toggle('done', s.slotsDone);
+    REG.status.textContent = s.acked ? 'acked ✓' : 'pending';
+    document.getElementById('stHW').textContent = s.hw[1];
+    document.getElementById('stISR').textContent = s.isr + ' / 3';
+    document.getElementById('stCommit').textContent = s.committed;
+    document.getElementById('stVer').textContent = 'v' + s.version;
+    document.getElementById('stEU').textContent = '$' + fmt(s.eu);
+  }
+
+  function clearTransients() {
+    document.querySelectorAll('.tr').forEach(n => n.remove());
+    activePkt = null;
+    Object.keys(REG).forEach(k => { const e = REG[k]; if (e && e.classList) e.classList.remove('hot'); });
+    ['hash', 'batch', 'disk0', 'disk2'].forEach(k => showTxt(k, ''));
+  }
+  function ensurePkt() {
+    if (!activePkt) {
+      activePkt = pkt('O-5531 · $84.50', C.kafka);
+      svg.appendChild(activePkt);
+      placeAt(activePkt, 109, 150);
+    }
+    return activePkt;
+  }
+
+  /* ================================================================
+     STEPS: animation + narration + code references
+     ================================================================ */
+  function buildSteps() {
+    const list = [];
+    const add = s => list.push(s);
+    const lanes = on => { for (let b = 0; b < 3; b++) setHL('c' + b + '1', on); };
+
+    add({
+      title: 'The shopper places an order',
+      body: 'The customer clicks Place order. The checkout page packages the order as one event and sends it to our server with a normal web request. The browser never talks to Kafka directly.',
+      under: [
+        'The event includes customer_id. That field decides where the event will go in Kafka.',
+        'The server replies with 202 only after Kafka confirms it has stored the event.'
+      ],
+      lens: 'In the shopper’s browser, as a JSON object about to be sent to /api/orders',
+      refs: [
+        R('checkout', 'const order = {', '};', 'Build the order event'),
+        R('checkout', 'const res = await fetch', '});', 'Send it to the API')
+      ],
+      apply() {},
+      async run() {
+        setHL('web', true);
+        ensurePkt();
+        await wait(1700);
+        setHL('web', false);
+      }
+    });
+
+    add({
+      title: 'The API gives the event to a Kafka producer',
+      body: 'The orders API is a Kafka producer. It takes the customer ID as the key. Kafka hashes that key and picks partition 1, so every event from this customer lands in the same place, in order.',
+      under: [
+        'The default partitioner hashes the key with murmur2. The same key always produces the same partition number.',
+        'The number of partitions is fixed per topic in practice. Changing it later would move keys to different partitions.',
+        'Events with no key are spread across partitions and have no ordering guarantee between them.'
+      ],
+      lens: 'Still in the API process, choosing a destination: partition 1 (hash(C-102) mod 3 = 1)',
+      refs: [
+        R('orders_api', 'key = order["customer_id"]', null, 'Customer ID becomes the key')
+      ],
+      apply() {},
+      async run() {
+        ensurePkt();
+        lanes(true);
+        showTxt('hash', 'hash("C-102") mod 3 = 1');
+        await wait(1900);
+      }
+    });
+
+    add({
+      title: 'Append to the leader’s log',
+      body: 'The producer sends the event to broker 2, which leads partition 1. The broker appends it to the end of the partition log and assigns offset 4812. That number is the event’s permanent address inside the partition.',
+      under: [
+        'Each partition has exactly one leader, and all writes go there. That is what keeps the order inside a partition well defined.',
+        'Appends are sequential disk writes. Kafka relies on sequential I/O and the OS page cache for its speed.',
+        'Records are not overwritten. They stay until retention or compaction removes them.'
+      ],
+      lens: 'Kafka broker 2 · partition 1 (leader) · offset 4812',
+      refs: [
+        R('orders_api', 'producer.produce(', null, 'Hand the event to the producer')
+      ],
+      apply(s) { s.hw[1] = 4812; },
+      async run() {
+        ensurePkt();
+        lanes(false);
+        showTxt('hash', '');
+        await move(activePkt, [[194, 220], [358, 209], [390, 209]], 1500);
+        flash('c11');
+        state.hw[1] = 4812;
+        render();
+        showTxt('hash', 'offset 4812 assigned');
+        await wait(1300);
+        showTxt('hash', '');
+      }
+    });
+
+    add({
+      title: 'Copy to other brokers, then acknowledge',
+      body: 'The producer is set to acks=all. The leader waits until the in-sync copies on brokers 1 and 3 have the event too. Only then does the acknowledgement return. The API then answers 202, and the shopper sees success.',
+      under: [
+        'Copies pull from the leader the same way consumers do. Copies that are fully caught up form the ISR, the in-sync replica set.',
+        'acks=0 returns immediately and can lose data silently. acks=1 waits only for the leader, so a leader crash can lose the event.',
+        'min.insync.replicas=2 means at least two copies must be present for acks=all to succeed. Otherwise the write is refused, not quietly under-replicated.'
+      ],
+      lens: 'Three copies of partition 1 (one per broker), then the acknowledgement travels back to the shopper',
+      refs: [
+        R('orders_api', '"acks": "all"', null, 'Wait for in-sync copies'),
+        R('orders_api', 'enable.idempotence', null, 'Retries cannot duplicate'),
+        R('orders_api', 'producer.flush()', null, 'Block until acknowledged'),
+        R('topic', '--replication-factor 3', null, 'Three copies per partition'),
+        R('topic', 'min.insync.replicas=2', null, 'At least two in-sync copies')
+      ],
+      apply(s) { s.acked = true; },
+      async run() {
+        ensurePkt();
+        const c1 = pkt('', C.kafka, 7), c2 = pkt('', C.kafka, 7);
+        svg.appendChild(c1); svg.appendChild(c2);
+        await Promise.all([
+          move(c1, [[358, 209], [322, 209]], 950),
+          move(c2, [[422, 209], [458, 209]], 950)
+        ]);
+        c1.remove(); c2.remove();
+        flash('c01'); flash('c21');
+        await wait(400);
+        setColor(activePkt, C.delta);
+        setLabel(activePkt, 'ack');
+        await move(activePkt, [[390, 209], [358, 209], [194, 220]], 1300);
+        state.acked = true;
+        render();
+        await wait(900);
+        activePkt.remove();
+        activePkt = null;
+      }
+    });
+
+    if (crashOn) {
+      add({
+        title: 'Failure: broker 2 crashes',
+        body: 'Broker 2 goes down. The controller removes it from the ISR and makes broker 1 the new leader for partition 1. Broker 1 already has order O-5531, so nothing that was acknowledged is lost.',
+        under: [
+          'Only in-sync copies can become leader. That rule protects every event that was already acknowledged.',
+          'Unclean leader election is off by default. Turning it on trades durability for availability.',
+          'Producers and consumers refresh their metadata and retry against the new leader automatically.'
+        ],
+        lens: 'Broker 1 is now the leader for partition 1. Broker 2 is down.',
+        refs: [
+          R('topic', '--describe --topic orders', 'Isr: 2,3,1', 'Check leaders and in-sync copies')
+        ],
+        apply(s) { s.crashed = 1; s.leaders[1] = 0; s.isr = 2; },
+        async run() {
+          state.crashed = 1; state.leaders[1] = 0; state.isr = 2;
+          flash('broker1');
+          render();
+          flash('c01');
+          await wait(2100);
+        }
+      });
+    }
+
+    add({
+      title: 'Spark reads the event as a Kafka consumer',
+      body: 'The Spark job subscribes to the orders topic and pulls new records in micro-batches. Partition 1 is read by one executor. Spark keeps its own record of which offsets it has read, in a checkpoint folder.',
+      under: [
+        'Consumers pull from Kafka. Kafka never pushes. The event stays in Kafka afterwards, so other consumers can read it as well.',
+        'Spark does not rely on Kafka consumer-group offset commits. The checkpoint is the source of truth for its progress.',
+        'The bronze stream stores the raw bytes unchanged, so the data can be replayed later.'
+      ],
+      lens: 'In executor 2’s memory, as part of micro-batch 88 (offsets 4800 to 4812)',
+      refs: [
+        R('spark', 'bronze_in = (spark.readStream', '.load())', 'Spark reads from Kafka'),
+        R('spark', '.toTable("main.bronze.orders_raw")', null, 'Bronze: raw copy in Delta')
+      ],
+      apply() {},
+      async run() {
+        const src = state.leaders[1];
+        if (activePkt) activePkt.remove();
+        activePkt = pkt('O-5531', C.spark);
+        svg.appendChild(activePkt);
+        await move(activePkt, [[BX[src] + 40, 209], [BX[src] + 72, 209], [600, 209], [740, 209], [790, 236]], 2200);
+        activePkt.remove();
+        activePkt = null;
+        showTxt('batch', 'batch 88 · offsets 4800–4812');
+        setHL('ex1', true);
+        await wait(1000);
+        setHL('ex1', false);
+      }
+    });
+
+    add({
+      title: 'The driver plans the job',
+      body: 'The driver turns the streaming code into a plan: read, parse, filter, join, aggregate, write. Catalyst optimizes that plan first. Then the driver cuts it into stages at each shuffle.',
+      under: [
+        'Predicate pushdown moves the amount > 0 filter into the read, so invalid events are dropped early.',
+        'Column pruning removes fields the query does not need, which reduces the data moved.',
+        'Adaptive Query Execution can change join strategy or partition sizes while the job runs, based on real statistics.'
+      ],
+      lens: 'The plan lives in the driver. The rows still sit in executor memory.',
+      refs: [
+        R('spark', 'valid = parsed.filter', null, 'Filter, pushed down')
+      ],
+      apply(s) { s.drv = ['plan: read → filter → join', '→ groupBy(region) → write']; },
+      async run() {
+        setHL('driver', true);
+        state.drv = ['plan: read → filter → join', '→ groupBy(region) → write'];
+        render();
+        await wait(2100);
+        setHL('driver', false);
+      }
+    });
+
+    add({
+      title: 'Stage 1: narrow work, no movement',
+      body: 'Filtering and the join happen where the data already is. The small customers table is copied once to every executor, so each row can look up its region locally. No shuffle is needed yet.',
+      under: [
+        'A broadcast join copies the small side to every executor. The size limit is spark.sql.autoBroadcastJoinThreshold, 10 MB by default.',
+        'Narrow transformations keep each output partition tied to one input partition, so tasks run in parallel with no network traffic.',
+        'A stage is work that runs without interruption. All of its tasks finish before the next stage starts.'
+      ],
+      lens: 'Executor 2, with the order now tagged region = EU',
+      refs: [
+        R('spark', 'enriched = (valid', '.withColumn("region"', 'Broadcast join adds the region')
+      ],
+      apply(s) { s.slotsDone = true; },
+      async run() {
+        const chips = [0, 1, 2].map(() => pkt('', C.chip, 6));
+        chips.forEach(c => svg.appendChild(c));
+        await Promise.all(chips.map((c, i) => move(c, [[790, 126], [EX[i], 170]], 900)));
+        chips.forEach(c => c.remove());
+        for (let i = 0; i < 3; i++) setHL('ex' + i, true);
+        state.slotsDone = true;
+        render();
+        ensurePkt();
+        setLabel(activePkt, 'O-5531 · EU');
+        placeAt(activePkt, 790, 236);
+        showTxt('batch', 'batch 88 · filter ✓ · join ✓');
+        await wait(1600);
+        for (let i = 0; i < 3; i++) setHL('ex' + i, false);
+      }
+    });
+
+    add({
+      title: 'Shuffle: rows regroup by region',
+      body: 'groupBy(region) needs every EU row in one place. Each executor splits its rows by a hash of the region, writes the pieces to local disk, and sends them over the network to the executor that owns that hash bucket.',
+      under: [
+        'This is a wide transformation, and the most expensive step: disk writes, network transfer, then disk reads.',
+        'spark.sql.shuffle.partitions (200 by default) sets how many buckets exist. Too many tiny tasks add overhead; too few create giant ones.',
+        'A skewed key, such as one very large region, leaves a single task doing most of the work. AQE can split such partitions.'
+      ],
+      lens: 'Moving across the network from executors 1 and 2 to executor 3',
+      refs: [
+        R('spark', '.groupBy(F.window', null, 'Group by region: the shuffle')
+      ],
+      apply() {},
+      async run() {
+        showTxt('disk0', 'writes shuffle files to disk');
+        await wait(500);
+        const dots = [];
+        for (let i = 0; i < 10; i++) {
+          const src = i % 2 ? 0 : 1;
+          const d = pkt('', C.spark, 4);
+          svg.appendChild(d);
+          dots.push([d, src, i]);
+        }
+        await Promise.all(dots.map(([d, src, i]) =>
+          move(d, [[EX[src], 236], [900, 236 + ((i % 3) - 1) * 10]], 800 + i * 60)));
+        dots.forEach(([d]) => d.remove());
+        showTxt('disk2', 'receives EU rows');
+        flash('ex2');
+        await wait(900);
+      }
+    });
+
+    add({
+      title: 'Stage 2: aggregate per region and window',
+      body: 'Executor 3 now holds every EU row for this window and sums them. The EU total for the current minute moves from $1,119.00 to $1,203.50. This is the number the dashboard shows.',
+      under: [
+        'groupBy with sum pre-aggregates on each executor first, so far fewer rows need to cross the network.',
+        'The window closes once the watermark passes, so late events inside the allowed delay still count.',
+        'The finished row is written through a transactional sink. That is the next step.'
+      ],
+      lens: 'Executor 3 memory, with the new total ready to write',
+      refs: [
+        R('spark', '.agg(F.sum("amount")', null, 'Sum the amount per region')
+      ],
+      apply(s) { s.eu = 1203.5; },
+      async run() {
+        setHL('ex2', true);
+        if (activePkt) {
+          await move(activePkt, [[790, 236], [900, 236]], 700);
+          activePkt.remove();
+          activePkt = null;
+        }
+        showTxt('batch', 'EU sum: 1,119.00 + 84.50');
+        const a = 1119, b = 1203.5;
+        await tween(1200, t => { REG.goldVal.textContent = fmt(a + (b - a) * t); });
+        state.eu = b;
+        render();
+        setHL('ex2', false);
+        await wait(700);
+      }
+    });
+
+    add({
+      title: 'Write to Delta: bronze, silver, gold',
+      body: 'Each layer is written as Delta: raw events to bronze, cleaned rows to silver, aggregates to gold. Each write adds new Parquet files. Then one commit entry is added to the _delta_log. Only that commit makes the new version real.',
+      under: [
+        'Parquet files are never edited. Delta writes new files and records which old files are no longer part of the table.',
+        'The commit is a single atomic write of one JSON file in _delta_log. Readers see the whole batch or none of it.',
+        'Delta records the query and batch IDs, so if this batch is replayed, Delta recognizes it and does not write it twice.'
+      ],
+      lens: 'Now in cloud storage: Parquet files, plus one commit in _delta_log',
+      refs: [
+        R('spark', '.toTable("main.bronze.orders_raw")', null, 'Bronze'),
+        R('spark', '.toTable("main.silver.orders_clean")', null, 'Silver'),
+        R('spark', '.toTable("main.gold.revenue_by_region")', null, 'Gold')
+      ],
+      apply(s) {
+        s.files.bronze.push('part-00413.parquet');
+        s.files.silver.push('part-00206.parquet');
+        s.files.gold.push('part-00019.parquet');
+        s.version = 742;
+        s.logs = [741, 742];
+      },
+      async run() {
+        ensurePkt();
+        setColor(activePkt, C.delta);
+        placeAt(activePkt, 900, 236);
+        setLabel(activePkt, 'raw');
+        await move(activePkt, [[900, 236], [900, 352], [170, 352], [170, 410]], 1700);
+        state.files.bronze.push('part-00413.parquet');
+        render(); flash('bronze');
+        setLabel(activePkt, 'clean');
+        await move(activePkt, [[170, 452], [440, 452]], 900);
+        state.files.silver.push('part-00206.parquet');
+        render(); flash('silver');
+        setLabel(activePkt, 'agg');
+        await move(activePkt, [[440, 452], [710, 452]], 900);
+        state.files.gold.push('part-00019.parquet');
+        render(); flash('gold');
+        await wait(300);
+        state.version = 742;
+        state.logs = [741, 742];
+        render();
+        flash('log');
+        activePkt.remove();
+        activePkt = null;
+        await wait(900);
+      }
+    });
+
+    add({
+      title: 'Save progress in the checkpoint',
+      body: 'After the Delta commit succeeds, Spark records the end offset of the batch (4813) in its checkpoint folder. If the job restarts, it reads the checkpoint and resumes from exactly that point. This is Spark’s own record, not a Kafka consumer-group commit.',
+      under: [
+        'The checkpoint has offsets/ (what each batch will read) and commits/ (what has finished). Both are needed for exactly-once results.',
+        'If Spark crashes after the Delta commit but before this write, batch 88 is read again. Delta recognizes the repeat and skips it, so totals are not doubled.',
+        'Keep the checkpoint on reliable storage. It is the only record of the job’s progress.'
+      ],
+      lens: 'Offset 4813 saved in the Spark checkpoint folder',
+      refs: [
+        R('spark', '.option("checkpointLocation", CHECKPOINT + "/gold")', null, 'Checkpoint for gold')
+      ],
+      apply(s) { s.committed = 4813; },
+      async run() {
+        const sq = pkt('', C.spark, 6);
+        svg.appendChild(sq);
+        await move(sq, [[790, 236], [790, 170], [790, 126]], 1400);
+        sq.remove();
+        state.committed = 4813;
+        state.drv = ['checkpoint: offset 4813 saved', 'next batch starts at 4814'];
+        render();
+        flash('driver');
+        await wait(1200);
+      }
+    });
+
+    add({
+      title: 'Time travel: the past is still there',
+      body: 'Delta keeps earlier versions until VACUUM removes their files. So the EU total from before this batch can still be queried. This helps with audits, debugging and rollbacks.',
+      under: [
+        'VERSION AS OF 741 reads the table as it was before this commit.',
+        'How far back you can travel is controlled by the retention settings. VACUUM removes files older than that.',
+        'Time travel reads the log and the files, so it costs nothing extra beyond what VACUUM has not yet removed.'
+      ],
+      lens: 'Nothing moved. Only the view of the table changed.',
+      refs: [
+        R('sql', 'FROM main.gold.revenue_by_region VERSION AS OF 741', null, 'Time-travel query')
+      ],
+      apply() {},
+      async run() {
+        setHL('gold', true);
+        REG.goldVal.textContent = '1,119.00';
+        showTxt('batch', 'SELECT … VERSION AS OF 741');
+        await wait(2300);
+        showTxt('batch', '');
+        setHL('gold', false);
+        render();
+      }
+    });
+
+    add({
+      title: 'The dashboard reads the answer',
+      body: 'A revenue API queries the gold table with SQL. The dashboard calls that API every 10 seconds and shows the latest EU number. The whole journey now finishes on a shopper’s screen.',
+      under: [
+        'The API connects to Databricks with a token and runs one query against the gold table.',
+        'The dashboard only fetches a small JSON result. It never touches Kafka, Spark or Delta directly.',
+        'Journey recap: browser → orders API → Kafka (broker 2, partition 1, offset 4812) → copies 1 and 3 → Spark → Delta bronze, silver, gold → checkpoint 4813 → dashboard.'
+      ],
+      lens: 'Dashboard shows the latest EU minute total from the gold table',
+      refs: [
+        R('revenue_api', '@app.get("/api/revenue")', null, 'API endpoint'),
+        R('revenue_api', '"SELECT window_end', null, 'SQL against Delta'),
+        R('dashboard', 'const res = await fetch', null, 'Browser refreshes the number')
+      ],
+      apply() {},
+      async run() {
+        showTxt('batch', 'dashboard refreshed ✓');
+        await wait(1400);
+      }
+    });
+
+    return list;
+  }
+
+  /* ================================================================
+     NAVIGATION & PLAYBACK
+     ================================================================ */
+  const HOPS = [
+    { label: 'Browser', step: 0, cls: 'k' },
+    { label: 'API (producer)', step: 1, cls: 'k' },
+    { label: 'Kafka', step: 2, cls: 'k' },
+    { label: 'Spark', step: 5, cls: 's' },
+    { label: 'Delta Lake', step: 10, cls: 'd' },
+    { label: 'Dashboard', step: 13, cls: 'd' }
+  ];
+  function renderHops() {
+    const box = document.getElementById('hops');
+    box.innerHTML = '';
+    HOPS.forEach((h, i) => {
+      if (i) { const a = document.createElement('span'); a.className = 'arr'; a.textContent = '→'; box.appendChild(a); }
+      const b = document.createElement('button');
+      b.className = 'hop ' + h.cls;
+      b.textContent = h.label;
+      const next = HOPS[i + 1] ? HOPS[i + 1].step : steps.length;
+      if (cur >= h.step && cur < next) b.classList.add('on');
+      b.addEventListener('click', () => jump(h.step));
+      box.appendChild(b);
+    });
+  }
+
+  function showStep(i) {
+    const st = steps[i];
+    document.getElementById('nStep').textContent = 'Step ' + (i + 1) + ' of ' + steps.length;
+    document.getElementById('nTitle').textContent = st.title;
+    document.getElementById('nBody').textContent = st.body;
+    const ul = document.getElementById('nUnder');
+    ul.innerHTML = '';
+    st.under.forEach(t => { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
+    document.getElementById('nLens').textContent = st.lens;
+    document.getElementById('barFill').style.width = ((i + 1) / steps.length * 100) + '%';
+    setStepCode(st.refs);
+    renderTimeline();
+    renderHops();
+  }
+  function renderTimeline() {
+    const tl = document.getElementById('tl');
+    tl.innerHTML = '';
+    steps.forEach((st, i) => {
+      const b = document.createElement('button');
+      b.textContent = i + 1;
+      b.title = st.title;
+      if (i < cur) b.classList.add('done');
+      if (i === cur) b.classList.add('on');
+      b.addEventListener('click', () => jump(i));
+      tl.appendChild(b);
+    });
+  }
+  function setStatus(s) { document.getElementById('status').textContent = s; }
+  function updateButtons() {
+    const playBtn = document.getElementById('play');
+    playBtn.textContent = playing ? 'Pause' : (finished ? 'Replay' : (cur > 0 ? 'Resume' : 'Play'));
+    document.querySelectorAll('.spd').forEach(b => b.classList.toggle('on', +b.dataset.s === speed));
+  }
+  function resetTo(k) {
+    state = clone(INIT);
+    for (let i = 0; i < k; i++) steps[i].apply(state);
+    clearTransients();
+    render();
+  }
+  function cancelRun() { gen++; loopActive = false; clearTransients(); }
+  function startRun(k) {
+    const my = ++gen;
+    loopActive = true;
+    (async () => {
+      for (let i = k; i < steps.length; i++) {
+        if (my !== gen) return;
+        cur = i;
+        showStep(i);
+        setStatus('playing · step ' + (i + 1) + ' of ' + steps.length);
+        await steps[i].run();
+        if (my !== gen) return;
+        if (i < steps.length - 1) { await wait(450); if (my !== gen) return; }
+      }
+      if (my === gen) {
+        loopActive = false; playing = false; finished = true;
+        setStatus('done · press Replay to watch it again');
+        updateButtons();
+      }
+    })();
+  }
+  function jump(k) {
+    cancelRun();
+    k = Math.max(0, Math.min(steps.length - 1, k));
+    finished = false;
+    resetTo(k);
+    cur = k;
+    showStep(k);
+    if (playing) { startRun(k); setStatus('playing · step ' + (k + 1) + ' of ' + steps.length); }
+    else setStatus('paused · step ' + (k + 1) + ' of ' + steps.length);
+    updateButtons();
+  }
+  function play() {
+    if (finished) { finished = false; playing = true; jump(0); return; }
+    playing = true;
+    if (!loopActive) startRun(cur);
+    setStatus('playing · step ' + (cur + 1) + ' of ' + steps.length);
+    updateButtons();
+  }
+  function pause() {
+    playing = false;
+    setStatus('paused · step ' + (cur + 1) + ' of ' + steps.length);
+    updateButtons();
+  }
+
+  document.getElementById('play').addEventListener('click', () => (playing ? pause() : play()));
+  document.getElementById('prev').addEventListener('click', () => jump(cur - 1));
+  document.getElementById('next').addEventListener('click', () => jump(cur + 1));
+  document.getElementById('restart').addEventListener('click', () => jump(0));
+  document.querySelectorAll('.spd').forEach(b => b.addEventListener('click', () => { speed = +b.dataset.s; updateButtons(); }));
+  document.getElementById('crash').addEventListener('click', () => {
+    crashOn = !crashOn;
+    const btn = document.getElementById('crash');
+    btn.textContent = 'Simulate broker crash: ' + (crashOn ? 'ON' : 'OFF');
+    btn.classList.toggle('on', crashOn);
+    const wasPlaying = playing;
+    cancelRun();
+    playing = false;
+    steps = buildSteps();
+    finished = false;
+    cur = 0;
+    resetTo(0);
+    showStep(0);
+    playing = wasPlaying;
+    if (playing) startRun(0);
+    updateButtons();
+    setStatus(playing ? 'playing · step 1' : 'ready · press Play');
+  });
+
+  /* ================================================================
+     INIT
+     ================================================================ */
+  steps = buildSteps();
+  renderTabs();
+  resetTo(0);
+  showStep(0);
+  updateButtons();
+  setStatus('ready · press Play');
+})();
+</script>
+<script>
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
